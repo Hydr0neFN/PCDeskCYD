@@ -290,6 +290,12 @@ static void ws_event(WStype_t type, uint8_t *payload, size_t length) {
         ha_authenticated = true;
         status_text = "HA authenticated";
         Serial.println("[HA] auth_ok -> HA WebSocket authenticated");
+        // auth_ok fires on every reconnect, not just the first -- including
+        // a WS-only drop (e.g. HA restarts, WiFi stays up) where ws_begun
+        // never resets and this is the only re-sync point. Any entity state
+        // that changed during the outage would otherwise stay stale until
+        // its next individual subscribe_trigger event.
+        fetch_initial_states();
         send_subscribe_trigger();
       } else if (strcmp(msg_type, "auth_invalid") == 0) {
         ha_authenticated = false;

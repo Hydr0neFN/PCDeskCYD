@@ -305,6 +305,18 @@ value as "pending" and only letting refresh repaint once the confirmed
 snapshot matches it (or a 5s safety timeout elapses, treating the call as
 failed and reverting to true state).
 
+## Idle backlight off -- tried and reverted (visible flicker on wake)
+
+Attempted a plain `digitalWrite(TFT_BL, ...)` off/on toggle (30s idle timeout,
+wake on touch) as a power/screen-burn feature. Confirmed on hardware: waking
+the screen produced a visible brightness flicker, not a clean instant-on.
+TFT_eSPI only drives `TFT_BL` with a single `digitalWrite` during `tft.init()`
+(no PWM, no ongoing ownership -- see its `init()` source), so this board's
+backlight circuit likely needs a soft-start/PWM ramp rather than a raw digital
+step to switch cleanly. Reverted rather than chase a PWM implementation
+without being asked. If revisited, try `ledcAttach`/PWM ramp on `TFT_BL`
+instead of `digitalWrite`.
+
 ## Reference material
 
 - `C:\Users\Ruanyouyi\Downloads\ESP32-Cheap-Yellow-Display-main` — local
