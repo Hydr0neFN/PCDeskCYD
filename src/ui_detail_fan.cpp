@@ -16,14 +16,29 @@ static lv_obj_t *s_preset_matrix;
 static lv_obj_t *s_osc_btn;
 static lv_obj_t *s_osc_label;
 static bool s_oscillating = false;
+static bool s_is_on = false;
 
 // Same purpose as ui_detail_climate.cpp's copy: suppresses periodic
-// refresh's overwrite for a short window after any tap on this screen, so
-// a real subscribe_trigger confirmation has time to catch up before the
-// next 250ms refresh tick would otherwise flicker the tapped control back
-// to its stale pre-tap value and then forward again.
+// refresh's overwrite after a tap until the real subscribe_trigger
+// confirmation matches what was optimistically set, instead of a flat
+// timer -- fan.set_percentage/etc measured with real round-trip latency
+// on hardware, so ending suppression early on a confirmed match (with a
+// safety-timeout fallback) is more reliable than guessing a duration.
 static unsigned long s_last_interaction_ms = 0;
-static constexpr unsigned long INTERACTION_SUPPRESS_MS = 1000;
+static constexpr unsigned long SAFETY_TIMEOUT_MS = 5000;
+
+static bool s_pending_speed = false;
+static int s_pending_speed_idx = -1;
+static bool s_pending_preset = false;
+static int s_pending_preset_idx = -1;
+static bool s_pending_osc = false;
+static bool s_pending_osc_on = false;
+static bool s_pending_power = false;
+static bool s_pending_power_on = false;
+
+static void clear_pending() {
+  s_pending_speed = s_pending_preset = s_pending_osc = s_pending_power = false;
+}
 
 // Buttonmatrix label text vs the HA service value it maps to -- 直吹/自然
 // are our own short labels, HA's actual preset_mode strings are English
@@ -71,6 +86,10 @@ static void back_cb(lv_event_t *e) {
 
 static void power_cb(lv_event_t *e) {
   s_last_interaction_ms = millis();
+  s_is_on = !s_is_on;
+  lv_obj_set_style_bg_color(s_power_btn, lv_color_hex(s_is_on ? 0xFFC107 : 0x757575), 0);
+  s_pending_power = true;
+  s_pending_power_on = s_is_on;
   ha_call_service("fan", "toggle", s_entity_id);
 }
 
@@ -78,6 +97,8 @@ static void speed_matrix_cb(lv_event_t *e) {
   s_last_interaction_ms = millis();
   uint32_t id = lv_buttonmatrix_get_selected_button(s_speed_matrix);
   if (id >= (uint32_t)SPEED_COUNT) return;
+  s_pending_speed = true;
+  s_pending_speed_idx = (int)id;
   ha_call_service_num("fan", "set_percentage", s_entity_id, "percentage", SPEED_VALUES[id]);
 }
 
@@ -85,6 +106,8 @@ static void preset_matrix_cb(lv_event_t *e) {
   s_last_interaction_ms = millis();
   uint32_t id = lv_buttonmatrix_get_selected_button(s_preset_matrix);
   if (id >= (uint32_t)PRESET_COUNT) return;
+  s_pending_preset = true;
+  s_pending_preset_idx = (int)id;
   ha_call_service_str("fan", "set_preset_mode", s_entity_id, "preset_mode", PRESET_VALUES[id]);
 }
 
@@ -97,6 +120,8 @@ static void set_osc_ui(bool on) {
 static void osc_cb(lv_event_t *e) {
   s_last_interaction_ms = millis();
   set_osc_ui(!s_oscillating);
+  s_pending_osc = true;
+  s_pending_osc_on = s_oscillating;
   ha_call_service_bool("fan", "oscillate", s_entity_id, "oscillating", s_oscillating);
 }
 
@@ -143,7 +168,8 @@ static void populate_from_snapshot(const FanState &snap) {
   set_checked_exclusive(s_speed_matrix, SPEED_COUNT, nearest_speed_index(snap.percentage));
   set_checked_exclusive(s_preset_matrix, PRESET_COUNT, preset_index_of(snap.preset_mode));
   set_osc_ui(snap.oscillating);
-  lv_obj_set_style_bg_color(s_power_btn, lv_color_hex(snap.is_on ? 0xFFC107 : 0x757575), 0);
+  s_is_on = snap.is_on;
+  lv_obj_set_style_bg_color(s_power_btn, lv_color_hex(s_is_on ? 0xFFC107 : 0x757575), 0);
 }
 
 static bool fetch_snapshot(const char *entity_id, FanState *out) {
@@ -162,6 +188,7 @@ static bool fetch_snapshot(const char *entity_id, FanState *out) {
 void ui_detail_fan_show(const char *entity_id) {
   strlcpy(s_entity_id, entity_id, sizeof(s_entity_id));
   s_return_screen = lv_screen_active();
+  clear_pending();
 
   FanState snap = {};
   if (fetch_snapshot(entity_id, &snap)) {
@@ -173,9 +200,19 @@ void ui_detail_fan_show(const char *entity_id) {
 
 void ui_detail_fan_refresh() {
   if (lv_screen_active() != s_screen) return;
-  if (millis() - s_last_interaction_ms < INTERACTION_SUPPRESS_MS) return;
   FanState snap = {};
-  if (fetch_snapshot(s_entity_id, &snap)) {
-    populate_from_snapshot(snap);
-  }
+  if (!fetch_snapshot(s_entity_id, &snap)) return;
+
+  int speed_idx = nearest_speed_index(snap.percentage);
+  int preset_idx = preset_index_of(snap.preset_mode);
+
+  bool still_pending = (s_pending_speed && speed_idx != s_pending_speed_idx) ||
+                        (s_pending_preset && preset_idx != s_pending_preset_idx) ||
+                        (s_pending_osc && snap.oscillating != s_pending_osc_on) ||
+                        (s_pending_power && snap.is_on != s_pending_power_on);
+
+  if (still_pending && millis() - s_last_interaction_ms < SAFETY_TIMEOUT_MS) return;
+
+  clear_pending();
+  populate_from_snapshot(snap);
 }

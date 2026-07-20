@@ -286,6 +286,25 @@ symbol icons -> `lv_font_montserrat_*`, never mix glyph classes on one
 label. `ui_manager_create_symbol_button()` encodes this split so
 detail-page back/power/up/down buttons don't need to think about it again.
 
+## Climate call_service round-trip latency: ~1.7-2.0s (not local)
+
+Measured via `monitor_filters = time` (platformio.ini) on `climate.ting`:
+`set_temperature` sent at 22:55:15.282, confirming `subscribe_trigger` event
+(new `target_temp`) landed at 22:55:16.945 -- and again 17.672 -> 19.616 on a
+second tap. This entity's underlying integration round-trips through a
+cloud-backed AC bridge, not a local protocol like Zigbee -- treat climate
+calls as 1-2s+ one-way, not near-instant like the Aqara lights.
+
+Consequence: a flat short suppression window (as used for optimistic light
+taps) isn't reliable here -- the periodic detail-page refresh (250ms tick)
+would repaint from ha_client's still-stale struct before the confirmation
+lands, visibly flickering the tapped control back to its pre-tap value and
+then forward again once the real event arrives. Fixed in
+`ui_detail_climate.cpp`/`ui_detail_fan.cpp` by tracking each optimistic
+value as "pending" and only letting refresh repaint once the confirmed
+snapshot matches it (or a 5s safety timeout elapses, treating the call as
+failed and reverting to true state).
+
 ## Reference material
 
 - `C:\Users\Ruanyouyi\Downloads\ESP32-Cheap-Yellow-Display-main` — local

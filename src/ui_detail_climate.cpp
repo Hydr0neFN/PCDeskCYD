@@ -17,13 +17,32 @@ static lv_obj_t *s_target_temp_label;
 static lv_obj_t *s_hvac_matrix;
 static lv_obj_t *s_fan_matrix;
 
-// Suppresses periodic refresh's overwrite for a short window after any tap
-// on this screen -- otherwise ui_detail_climate_refresh() (running every
-// 250ms while this screen is active) re-populates from ha_client's struct
-// before the real subscribe_trigger confirmation lands, visibly flickering
-// the just-tapped control back to its pre-tap value and then forward again.
+// Suppresses periodic refresh's overwrite after a tap until the real
+// subscribe_trigger confirmation matches what was optimistically set --
+// otherwise ui_detail_climate_refresh() (every 250ms while this screen is
+// active) re-populates from ha_client's still-stale struct before HA's
+// confirmation lands, visibly flickering the tapped control back to its
+// pre-tap value and then forward again. climate.set_temperature/etc
+// round-trips through a cloud-backed integration and measured ~1.7-2.0s on
+// hardware (see HARDWARE_NOTES.md), so a flat short timer isn't reliable --
+// suppression instead ends the instant the confirmed value agrees, with a
+// safety-timeout fallback in case the call silently fails.
 static unsigned long s_last_interaction_ms = 0;
-static constexpr unsigned long INTERACTION_SUPPRESS_MS = 1000;
+static constexpr unsigned long SAFETY_TIMEOUT_MS = 5000;
+
+static bool s_pending_temp = false;
+static float s_pending_temp_val = 0;
+static bool s_pending_hvac = false;
+static int s_pending_hvac_idx = -1;
+static bool s_pending_fan = false;
+static int s_pending_fan_idx = -1;
+static bool s_pending_power = false;
+static bool s_pending_power_on = false;
+static bool s_is_on = false;
+
+static void clear_pending() {
+  s_pending_temp = s_pending_hvac = s_pending_fan = s_pending_power = false;
+}
 
 // Buttonmatrix label text (what's tapped) vs the HA service value it maps
 // to -- these differ for a few entries (climate.ting's fan_mode/hvac_mode
@@ -63,6 +82,10 @@ static void back_cb(lv_event_t *e) {
 
 static void power_cb(lv_event_t *e) {
   s_last_interaction_ms = millis();
+  s_is_on = !s_is_on;
+  lv_obj_set_style_bg_color(s_power_btn, lv_color_hex(s_is_on ? 0xFFC107 : 0x757575), 0);
+  s_pending_power = true;
+  s_pending_power_on = s_is_on;
   ha_call_service("climate", "toggle", s_entity_id);
 }
 
@@ -76,12 +99,16 @@ static void set_target_temp(float t) {
 static void temp_up_cb(lv_event_t *e) {
   s_last_interaction_ms = millis();
   set_target_temp(s_target_temp < 32 ? s_target_temp + 1 : 32);
+  s_pending_temp = true;
+  s_pending_temp_val = s_target_temp;
   ha_call_service_num("climate", "set_temperature", s_entity_id, "temperature", s_target_temp);
 }
 
 static void temp_down_cb(lv_event_t *e) {
   s_last_interaction_ms = millis();
   set_target_temp(s_target_temp > 16 ? s_target_temp - 1 : 16);
+  s_pending_temp = true;
+  s_pending_temp_val = s_target_temp;
   ha_call_service_num("climate", "set_temperature", s_entity_id, "temperature", s_target_temp);
 }
 
@@ -89,6 +116,8 @@ static void hvac_matrix_cb(lv_event_t *e) {
   s_last_interaction_ms = millis();
   uint32_t id = lv_buttonmatrix_get_selected_button(s_hvac_matrix);
   if (id >= (uint32_t)HVAC_COUNT) return;
+  s_pending_hvac = true;
+  s_pending_hvac_idx = (int)id;
   ha_call_service_str("climate", "set_hvac_mode", s_entity_id, "hvac_mode", HVAC_VALUES[id]);
 }
 
@@ -96,6 +125,8 @@ static void fan_matrix_cb(lv_event_t *e) {
   s_last_interaction_ms = millis();
   uint32_t id = lv_buttonmatrix_get_selected_button(s_fan_matrix);
   if (id >= (uint32_t)FAN_COUNT) return;
+  s_pending_fan = true;
+  s_pending_fan_idx = (int)id;
   ha_call_service_str("climate", "set_fan_mode", s_entity_id, "fan_mode", FAN_VALUES[id]);
 }
 
@@ -149,8 +180,8 @@ static void populate_from_snapshot(const ClimateState &snap) {
   set_checked_exclusive(s_hvac_matrix, HVAC_COUNT, index_of(HVAC_VALUES, HVAC_COUNT, snap.hvac_mode));
   set_checked_exclusive(s_fan_matrix, FAN_COUNT, index_of(FAN_VALUES, FAN_COUNT, snap.fan_mode));
 
-  bool is_on = strcmp(snap.state, "off") != 0;
-  lv_obj_set_style_bg_color(s_power_btn, lv_color_hex(is_on ? 0xFFC107 : 0x757575), 0);
+  s_is_on = strcmp(snap.state, "off") != 0;
+  lv_obj_set_style_bg_color(s_power_btn, lv_color_hex(s_is_on ? 0xFFC107 : 0x757575), 0);
 }
 
 static bool fetch_snapshot(const char *entity_id, ClimateState *out) {
@@ -169,6 +200,7 @@ static bool fetch_snapshot(const char *entity_id, ClimateState *out) {
 void ui_detail_climate_show(const char *entity_id) {
   strlcpy(s_entity_id, entity_id, sizeof(s_entity_id));
   s_return_screen = lv_screen_active();
+  clear_pending();
 
   ClimateState snap = {};
   if (fetch_snapshot(entity_id, &snap)) {
@@ -180,9 +212,20 @@ void ui_detail_climate_show(const char *entity_id) {
 
 void ui_detail_climate_refresh() {
   if (lv_screen_active() != s_screen) return;
-  if (millis() - s_last_interaction_ms < INTERACTION_SUPPRESS_MS) return;
   ClimateState snap = {};
-  if (fetch_snapshot(s_entity_id, &snap)) {
-    populate_from_snapshot(snap);
-  }
+  if (!fetch_snapshot(s_entity_id, &snap)) return;
+
+  bool is_on = strcmp(snap.state, "off") != 0;
+  int hvac_idx = index_of(HVAC_VALUES, HVAC_COUNT, snap.hvac_mode);
+  int fan_idx = index_of(FAN_VALUES, FAN_COUNT, snap.fan_mode);
+
+  bool still_pending = (s_pending_temp && snap.target_temp != s_pending_temp_val) ||
+                        (s_pending_hvac && hvac_idx != s_pending_hvac_idx) ||
+                        (s_pending_fan && fan_idx != s_pending_fan_idx) ||
+                        (s_pending_power && is_on != s_pending_power_on);
+
+  if (still_pending && millis() - s_last_interaction_ms < SAFETY_TIMEOUT_MS) return;
+
+  clear_pending();
+  populate_from_snapshot(snap);
 }
