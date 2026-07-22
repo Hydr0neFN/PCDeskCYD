@@ -38,6 +38,21 @@ static void my_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
   lv_display_flush_ready(disp);
 }
 
+// Idle backlight off via LEDC PWM, ramped rather than a raw digitalWrite
+// step -- an earlier digitalWrite on/off attempt caused a visible
+// brightness flicker on wake (see HARDWARE_NOTES.md). TFT_BACKLIGHT_ON is
+// HIGH on this board, so PWM duty 255 = full on, 0 = off maps directly.
+static constexpr unsigned long IDLE_TIMEOUT_MS = 30000;
+static constexpr uint32_t BACKLIGHT_PWM_FREQ = 5000;
+static constexpr uint8_t BACKLIGHT_PWM_RES = 8;
+static constexpr unsigned long RAMP_STEP_MS = 8;
+static constexpr int RAMP_STEP = 6;
+
+static unsigned long s_last_touch_ms = 0;
+static unsigned long s_last_ramp_ms = 0;
+static int s_backlight_duty = 255;
+static int s_backlight_target = 255;
+
 static void my_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
   if (touchscreen.tirqTouched() && touchscreen.touched()) {
     TS_Point p = touchscreen.getPoint();
@@ -45,6 +60,9 @@ static void my_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
     data->point.x = map(p.x, 200, 3700, 1, 320);
     data->point.y = map(p.y, 240, 3800, 1, 240);
     data->state = LV_INDEV_STATE_PRESSED;
+
+    s_last_touch_ms = millis();
+    s_backlight_target = 255;
   } else {
     data->state = LV_INDEV_STATE_RELEASED;
   }
@@ -63,6 +81,10 @@ void setup() {
 
   tft.init();
   tft.setRotation(1);  // proven orientation: Examples/Basics/1-HelloWorld, 2-TouchTest
+
+  ledcAttach(TFT_BL, BACKLIGHT_PWM_FREQ, BACKLIGHT_PWM_RES);
+  ledcWrite(TFT_BL, s_backlight_duty);
+  s_last_touch_ms = millis();
 
   lv_init();
   lv_tick_set_cb(millis);
@@ -92,6 +114,19 @@ void loop() {
     ui_manager_refresh();
     ui_detail_climate_refresh();
     ui_detail_fan_refresh();
+  }
+
+  if (now - s_last_touch_ms >= IDLE_TIMEOUT_MS) {
+    s_backlight_target = 0;
+  }
+  if (s_backlight_duty != s_backlight_target && now - s_last_ramp_ms >= RAMP_STEP_MS) {
+    s_last_ramp_ms = now;
+    if (s_backlight_duty < s_backlight_target) {
+      s_backlight_duty = min(s_backlight_duty + RAMP_STEP, s_backlight_target);
+    } else {
+      s_backlight_duty = max(s_backlight_duty - RAMP_STEP, s_backlight_target);
+    }
+    ledcWrite(TFT_BL, s_backlight_duty);
   }
 
   lv_timer_handler();

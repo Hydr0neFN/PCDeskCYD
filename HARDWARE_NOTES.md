@@ -305,17 +305,22 @@ value as "pending" and only letting refresh repaint once the confirmed
 snapshot matches it (or a 5s safety timeout elapses, treating the call as
 failed and reverting to true state).
 
-## Idle backlight off -- tried and reverted (visible flicker on wake)
+## Idle backlight off -- needs PWM ramp, not a raw digitalWrite step
 
-Attempted a plain `digitalWrite(TFT_BL, ...)` off/on toggle (30s idle timeout,
-wake on touch) as a power/screen-burn feature. Confirmed on hardware: waking
-the screen produced a visible brightness flicker, not a clean instant-on.
-TFT_eSPI only drives `TFT_BL` with a single `digitalWrite` during `tft.init()`
-(no PWM, no ongoing ownership -- see its `init()` source), so this board's
-backlight circuit likely needs a soft-start/PWM ramp rather than a raw digital
-step to switch cleanly. Reverted rather than chase a PWM implementation
-without being asked. If revisited, try `ledcAttach`/PWM ramp on `TFT_BL`
-instead of `digitalWrite`.
+First attempt used a plain `digitalWrite(TFT_BL, ...)` off/on toggle (30s
+idle timeout, wake on touch). Confirmed on hardware: waking the screen
+produced a visible brightness flicker, not a clean instant-on. TFT_eSPI only
+drives `TFT_BL` with a single `digitalWrite` during `tft.init()` (no PWM, no
+ongoing ownership -- see its `init()` source), so this board's backlight
+circuit needs a soft-start ramp rather than a raw digital step to switch
+cleanly.
+
+Fixed by switching `TFT_BL` to LEDC PWM (`ledcAttach(TFT_BL, 5000, 8)` once
+in `setup()`, after `tft.init()`) and ramping duty 0<->255 in small steps
+(`RAMP_STEP`/`RAMP_STEP_MS` in `main.cpp`) on idle/wake instead of jumping
+directly between full and off. `TFT_BACKLIGHT_ON` is `HIGH` on this board,
+so PWM duty 255 = on, 0 = off maps directly -- would need inverting if a
+board variant used the opposite polarity.
 
 ## Reference material
 
