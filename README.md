@@ -1,4 +1,5 @@
 # PCDeskCYD
+<img width="3024" height="2081" alt="image" src="https://github.com/user-attachments/assets/47d75915-9cf5-43b6-af75-a281262daafc" />
 
 A 3-page touchscreen Home Assistant control panel running on a Cheap
 Yellow Display (ESP32-2432S028), talking to HA over its native WebSocket
