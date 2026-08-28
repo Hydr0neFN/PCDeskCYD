@@ -1,3 +1,5 @@
+**English** · [繁體中文](README.zh-TW.md)
+
 # PCDeskCYD
 <img width="3024" height="2081" alt="image" src="https://github.com/user-attachments/assets/47d75915-9cf5-43b6-af75-a281262daafc" />
 
