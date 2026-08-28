@@ -22,7 +22,7 @@ ESP32-2432S028 ("Cheap Yellow Display", CYD) -- 2.8" 320x240 ILI9341 TFT、XPT20
 
 1. 複製 `include/secrets.h.example` 為 `include/secrets.h`，並填入您的 WiFi 連線憑證與 Home Assistant 長期存取權杖（**Profile -> Security -> Long-Lived Access Tokens** in HA）。
 2. 編輯 `include/config.h`，填入您的 HA 主機名稱／連接埠。
-3. 編輯 `src/ha_client.cpp` 中的實體列表（`g_entities[]`）與房間分頁檔案（`src/ui_page_*.cpp`），以符合您自己的 HA 實體 — 本儲存庫的預設值是針對特定住家的空調／燈光／風扇配置所設定，在其他 HA 實體上無法直接套用。
+3. 編輯 `src/ha_client.cpp` 中的實體列表（`g_entities[]`）與房間分頁檔案（`src/ui_page_*.cpp`），以符合您自己的 HA 實體 — 本儲存庫的預設值是針對特定住家的空調／燈光／風扇配置所設定，換到另一套 HA 就沒有意義。
 4. 使用 [PlatformIO](https://platformio.org/) 建置並燒錄：
    ```
    pio run -t upload
