@@ -16,7 +16,7 @@
 
 ## 硬體
 
-ESP32-2432S028 ("Cheap Yellow Display", CYD) -- 2.8" 320x240 ILI9341 TFT、XPT2046 電阻式觸控、無 PSRAM。在點亮並調試此開發板時所發現的特定驅動程式特性、WebSocket 訊框大小限制以及字型處理流程注意事項，請參閱 [HARDWARE_NOTES.md](HARDWARE_NOTES.md) — 在修改顯示／觸控／字型程式碼前非常值得一讀。
+ESP32-2432S028 ("Cheap Yellow Display", CYD) -- 2.8" 320x240 ST7789 TFT（先前一直被誤認為 ILI9341 仿製晶片）、XPT2046 電阻式觸控、無 PSRAM。在點亮並調試此開發板時所發現的特定驅動程式特性、WebSocket 訊框大小限制以及字型處理流程注意事項，請參閱 [HARDWARE_NOTES.md](HARDWARE_NOTES.md) — 在修改顯示／觸控／字型程式碼前非常值得一讀。
 
 ## 設定
 

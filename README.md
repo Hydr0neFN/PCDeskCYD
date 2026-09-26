@@ -26,7 +26,7 @@ Arduino + LVGL 9 + TFT_eSPI.
 
 ## Hardware
 
-ESP32-2432S028 ("Cheap Yellow Display", CYD) -- 2.8" 320x240 ILI9341 TFT,
+ESP32-2432S028 ("Cheap Yellow Display", CYD) -- 2.8" 320x240 ST7789 TFT (long mistaken for an ILI9341 clone),
 XPT2046 resistive touch, no PSRAM. See [HARDWARE_NOTES.md](HARDWARE_NOTES.md)
 for the board-specific driver quirks, WebSocket frame-size limits, and
 font pipeline gotchas discovered while bringing this board up -- worth

@@ -4,7 +4,31 @@ Board: ESP32-2432S028, 2.8" 320x240, marked `TPM408-2.8` on the touch flex.
 Confirmed working stack and gotchas found during M1 bring-up — read this
 before touching display/touch code again.
 
-## Board variant: needs `ILI9341_2_DRIVER`, not plain `ILI9341_DRIVER`
+## Correction (2026-09-27): the controller is an ST7789
+
+The two sections below (`ILI9341_2_DRIVER`, `TFT_INVERSION_ON`) are
+**superseded**. They describe what made the panel usable, not what the
+controller is. Found while building the sibling project
+[NLDeskCYD](https://github.com/Hydr0neFN/NLDeskCYD) on this same board, whose
+dark theme exposed what this project's light theme hid:
+
+- With `ILI9341_2_DRIVER` + `TFT_INVERSION_ON`, every non-black colour had a
+  strong blue/green lift: `#0B0E14` showed as navy, amber `#D29922` as pale
+  mint, white as light cyan. Pure black stayed black, so it is a gamma
+  problem, not inversion or channel order.
+- Cause: the panel is an **ST7789**. `ILI9341_2_DRIVER` writes ILI9341-format
+  gamma tables into registers `E0`/`E1`, which the ST7789 interprets with a
+  different layout. The "ILI9341 clone with a different register set" reading
+  below was this: a different controller.
+- Fix, confirmed on hardware with a colour-swatch page: `-D ST7789_DRIVER`,
+  `TFT_WIDTH=240`, `TFT_HEIGHT=320`, `TFT_RGB_ORDER=TFT_BGR`, inversion
+  **off**. Geometry, rotation 1 and the touch mapping are unchanged.
+- Why the plain `ILI9341_DRIVER` left part of the panel unwritten while
+  `ILI9341_2_DRIVER` did not is inferred, not measured: the `_2` init writes a
+  full-screen `CASET`/`RASET` window and orders `MADCTL` differently. A logic
+  analyser trace would settle it.
+
+## Board variant: needs `ILI9341_2_DRIVER`, not plain `ILI9341_DRIVER` *(superseded, kept for history)*
 
 This board's ILI9341 clone controller uses a different init/register sequence
 than a standard ILI9341 (different `PWCTR1/2`, `VMCTR1/2`, gamma tables,
@@ -74,7 +98,7 @@ Fix (both, belt and suspenders):
 - `static uint16_t draw_buf[...] __attribute__((aligned(4)));`
 - `#define LV_DRAW_BUF_ALIGN 4` in `lv_conf.h`
 
-## Color inversion — needs `TFT_INVERSION_ON`
+## Color inversion — needs `TFT_INVERSION_ON` *(superseded: correct for `ILI9341_2_DRIVER` only; ST7789 wants inversion off)*
 
 Without an explicit `TFT_INVERSION_ON`/`_OFF` build flag, `ILI9341_2_DRIVER`'s
 default inversion state is wrong for this board: a known-green LVGL label
